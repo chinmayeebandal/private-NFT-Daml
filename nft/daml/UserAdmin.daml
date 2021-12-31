@@ -1,0 +1,107 @@
+module UserAdmin where
+
+import Token
+import Payment
+
+-- content creator
+template Issuer
+   with
+      userAdmin: Party
+      issuer: Party 
+      --entitlement granted by UserAdmin to Issuer to mint NFTs
+
+    where
+      signatory userAdmin
+      
+      controller issuer can
+        -- nonconsuming: token is not destroyed/archived when MintToken is issued
+        nonconsuming MintToken: ContractId Token
+          with
+            description: Text
+            initialPrice: Decimal
+            currency: Text
+            royaltyRate: Decimal -- allowing issuer to add royalty rate
+
+          do 
+            issued <- getTime
+            create Token 
+              with 
+                lastPrice = initialPrice
+                owner = issuer
+                ..
+    
+      controller userAdmin can
+        RevokeIssuer: () -- this right will be revoked/archived as soon as userAdmin says so
+          do return ()
+
+
+
+-- to request for a new token/contract
+-- to request access to the network 
+template IssuerRequest
+  with 
+    userAdmin: Party -- request to UserAdmin
+    issuer: Party  -- sent by issuer
+    reason: Text   --why they should be allowed
+
+  where
+    signatory issuer
+    
+    controller userAdmin can
+      GrantIssuerRights: ContractId Issuer
+        do
+          create Issuer with ..
+      
+      RejectIssuerRequest: ()
+        do return()
+
+
+
+template Owner
+  with
+     userAdmin: Party
+     owner: Party
+  where 
+     signatory userAdmin
+
+     
+     controller owner can
+        -- accept token based on offerId
+        nonconsuming AcceptTokenAsNewOwner: (ContractId Token, ContractId Payable, ContractId Payable)
+          with
+            offerId: ContractId TokenOffer
+          do
+            exercise offerId AcceptToken
+
+
+        -- allows to accept token based on key
+        -- useful if contract changes(because the contract id will change). helps with persistency
+        nonconsuming AcceptTokenByKey: (ContractId Token, ContractId Payable, ContractId Payable)
+          with 
+            issuer: Party
+            currentOwner: Party
+            description: Text
+          do
+            exerciseByKey @TokenOffer (issuer, currentOwner, description) AcceptToken
+
+
+     controller userAdmin can
+        RevokeOwnerRights: ()
+          do return()
+
+
+template OwnerRequest 
+  with
+    userAdmin: Party
+    owner: Party
+    reason: Text
+   where
+     signatory owner
+
+     controller userAdmin can
+       GrantOwnerRights: ContractId Owner
+         do
+           create Owner with ..
+
+       RejectOwnerRequest: ()
+         do return()

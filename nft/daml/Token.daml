@@ -1,0 +1,112 @@
+module Token where 
+
+import Payment
+
+
+{- 
+-> Content creators (issuers) can create NFTs and offer them for purchase (Token and TokenOffer templates)
+-> Owners can sell their NFTs and have to pay royalties (Receipt, Payable, and PaymentClaim templates)
+-> Parties (issuers and owners) must be explicitly permitted to join the network (Issuer, IssuerRequest, Owner, and OwnerRequest templates)
+-}
+
+-- behavior
+--data model 
+-- rights/obligations
+
+template Token
+   with
+     issuer: Party
+     owner: Party
+     description: Text
+     userAdmin: Party -- ensures issuer+owner are legit
+     issued: Time
+     lastPrice: Decimal --track worth of the item
+     currency: Text
+     royaltyRate: Decimal 
+   
+   where
+     signatory issuer, userAdmin
+     {- 
+     Liability Side: 
+     issuer: token to be signed off by issuer, to prove at some point the issuer has signed off on it. 
+          --Daml concept: One can never be an obligible party on a contract without ones knowing and informaed consent. 
+          If the "issuer" is designated as a signatory: The only way a token can exist on the ledger having that issuer is if the issuer signed off on it. This ensures the tokens are actually signed off by the peoplle who need to sign it. 
+     -}
+     {-
+     userAdmin: responsible to ensure the issuer and owner are legitimate parties on the ledger. This gives a measure of KYC(Know Your Customer). 
+     Signs off the token, in the sense that they are ensuring that issuers are issuers and owners are owners. 
+     If userAdmin is not a signatory, any of the parties on the ledger could issue their own token. 
+     -}
+
+     -- BEHAVIORS --
+
+     -- Owner can offer a currency at a price
+     controller owner can 
+        Offer: ContractId TokenOffer
+           with
+             newOwner : Party
+             price: Decimal
+
+           do
+             create TokenOffer with ..
+
+
+
+
+-- TokenOffer gives an option to the newOwner to take ownership of the token. The newOwner must accept the price, for the token to go into effect with the newOwner
+template TokenOffer
+   with 
+     issuer: Party
+     owner: Party
+     description: Text
+     userAdmin: Party -- ensures issuer+owner are legit
+     issued: Time
+     newOwner: Party
+     price: Decimal -- offer price
+     lastPrice: Decimal
+     currency: Text 
+     royaltyRate: Decimal
+
+   -- issuer: signing off on transaction
+   -- userAdmin: ensures owner(old owner) and newOwner are legitimate
+   -- owner: to indicate they signed off on potentially offering the token to the newOwner
+   where
+      signatory issuer, userAdmin, owner
+
+      -- to make the token unique, unique key id
+      key (issuer, owner, description): (Party, Party, Text)
+
+      maintainer key._2 --second element(owner) will maintain the key
+
+      -- requires approval of userAdmin AND newOwner
+      controller newOwner, userAdmin can
+         -- giving right to newOwner to accept the token
+         AcceptToken: (ContractId Token, ContractId Payable, ContractId Payable)
+           do
+            --newOwner to owners: create a Payable token on accepting token
+            fromNewOwnerToOwner <- create Payable
+               with
+                  from = newOwner
+                  to = owner
+                  amount = price
+                  currency
+                  reference = "Notional for `" <> description <> "`."
+                     
+            
+            royaltyPayment <- create Payable
+               with
+                  from = newOwner
+                  to = issuer
+                  amount = price * royaltyRate
+                  currency
+                  reference = "Royalty for `" <> description <> "`."
+
+            newToken <- create Token
+               with
+               owner = newOwner
+               lastPrice = price
+               ..
+
+            
+            return (newToken, fromNewOwnerToOwner, royaltyPayment)
+                
